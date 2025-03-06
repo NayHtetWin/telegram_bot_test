@@ -1,8 +1,8 @@
 import os
-import asyncio
 from flask import Flask, request
 from telegram import Bot
 from gradio_client import Client
+import asyncio
 from functools import partial
 
 # Load environment variables
@@ -15,14 +15,10 @@ gradio_client = Client("nayhtet/testchat")
 app = Flask(__name__)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-async def send_typing_action(chat_id):
-    """Continuously send 'typing...' status every 3 seconds until stopped."""
-    try:
-        while True:
-            await bot.send_chat_action(chat_id=chat_id, action="typing")
-            await asyncio.sleep(3)  # Keep updating status every 3 seconds
-    except asyncio.CancelledError:
-        pass  # This will be triggered when we stop the task
+@app.before_request
+def log_request_info():
+    print('Headers:', dict(request.headers))
+    print('Body:', request.get_data().decode())
 
 def get_gradio_response(user_message):
     try:
@@ -42,6 +38,10 @@ def get_gradio_response(user_message):
 async def send_telegram_message(chat_id, text):
     await bot.send_message(chat_id=chat_id, text=text)
 
+async def send_typing_action(chat_id):
+    """Send 'typing...' status to the user."""
+    await bot.send_chat_action(chat_id=chat_id, action="typing")
+
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -55,18 +55,12 @@ def telegram_webhook():
             text = update["message"]["text"]
             print(f"Processing message from chat_id {chat_id}: {text}")
 
-            # Start the "typing..." status loop
-            typing_task = loop.create_task(send_typing_action(chat_id))
+            # Send 'typing...' action before getting response
+            loop.run_until_complete(send_typing_action(chat_id))
 
             # Get response from Gradio
             response_text = get_gradio_response(text)
-
-            # Stop the "typing..." status loop
-            typing_task.cancel()
-            try:
-                loop.run_until_complete(typing_task)  # Ensure it's stopped
-            except asyncio.CancelledError:
-                pass  # Task was cancelled successfully
+            print(f"Sending response: {response_text}")
 
             # Send the final response to the user
             loop.run_until_complete(send_telegram_message(chat_id, response_text))
