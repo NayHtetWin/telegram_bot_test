@@ -1,0 +1,5 @@
+Flask
+python-dotenv
+python-telegram-bot
+gradio-client
+gunicorn
