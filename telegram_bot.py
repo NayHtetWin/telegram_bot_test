@@ -4,6 +4,7 @@ from telegram import Bot
 from gradio_client import Client
 import asyncio
 from functools import partial
+import time
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -20,10 +21,10 @@ def log_request_info():
     print('Headers:', dict(request.headers))
     print('Body:', request.get_data().decode())
 
-def get_gradio_response(user_message):
+async def get_gradio_response(user_message):
     try:
         print(f"Sending message to Gradio: {user_message}")  # Debug print
-        result = gradio_client.predict(
+        result = await asyncio.to_thread(gradio_client.predict,
             message=user_message,
             system_message="burmese customer service chatbot",
             api_name="/chat"
@@ -39,11 +40,10 @@ async def send_telegram_message(chat_id, text):
     await bot.send_message(chat_id=chat_id, text=text)
 
 async def send_typing_action(chat_id):
-    """Send 'typing...' status to the user."""
-    await bot.send_chat_action(chat_id=chat_id, action="typing")
-
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+    """Continuously send 'typing...' status while waiting for a response."""
+    while True:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        await asyncio.sleep(3)  # Send typing action every 3 seconds
 
 @app.route(f"/webhook/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -55,12 +55,17 @@ def telegram_webhook():
             text = update["message"]["text"]
             print(f"Processing message from chat_id {chat_id}: {text}")
 
-            # Send 'typing...' action before getting response
-            loop.run_until_complete(send_typing_action(chat_id))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Start typing action in the background
+            typing_task = loop.create_task(send_typing_action(chat_id))
 
             # Get response from Gradio
-            response_text = get_gradio_response(text)
-            print(f"Sending response: {response_text}")
+            response_text = loop.run_until_complete(get_gradio_response(text))
+
+            # Stop typing action
+            typing_task.cancel()
 
             # Send the final response to the user
             loop.run_until_complete(send_telegram_message(chat_id, response_text))
